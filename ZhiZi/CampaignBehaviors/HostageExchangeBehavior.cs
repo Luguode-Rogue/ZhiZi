@@ -367,7 +367,7 @@ namespace ZhiZi.CampaignBehaviors
 
             MBTextManager.SetTextVariable("PLAYER_HERO", playerHero.Name, false);
             MBTextManager.SetTextVariable("FOREIGN_HERO", foreignHero.Name, false);
-            MBTextManager.SetTextVariable("ZHIZI_VALUE", requiredGold, false);
+            MBTextManager.SetTextVariable("ZHIZI_VALUE", requiredGold);
             return true;
         }
 
