@@ -272,7 +272,7 @@ namespace ZhiZi.CampaignBehaviors
                 "zhizi_exchange_confirm",
                 "zhizi_exchange_confirm",
                 "zhizi_exchange_confirm_options",
-                "{=!}{PLAYER_HERO.NAME}交换{FOREIGN_HERO.NAME}，参考价值约为{ZHIZI_VALUE}第纳尔。接下来谈钱。",
+                "{=!}{PLAYER_HERO.NAME}交换{FOREIGN_HERO.NAME}，参考价值约为{ZHIZI_VALUE}第纳尔。报价至少达到参考价值的25%才能提交，足额报价必定成功。",
                 ConfirmLineCondition,
                 null);
 
