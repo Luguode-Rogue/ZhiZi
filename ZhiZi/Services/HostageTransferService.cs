@@ -88,9 +88,17 @@ namespace ZhiZi.Services
                 }
             }
 
-            if (addToMainParty && hero.IsAlive && hero.PartyBelongedTo != MobileParty.MainParty)
+            if (addToMainParty && hero.IsAlive)
             {
-                AddHeroToPartyAction.Apply(hero, MobileParty.MainParty, false);
+                if (!hero.IsActive)
+                {
+                    hero.ChangeState(Hero.CharacterStates.Active);
+                }
+
+                if (hero.PartyBelongedTo != MobileParty.MainParty)
+                {
+                    AddHeroToPartyAction.Apply(hero, MobileParty.MainParty, false);
+                }
             }
         }
     }
