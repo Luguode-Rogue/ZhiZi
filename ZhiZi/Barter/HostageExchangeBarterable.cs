@@ -93,9 +93,8 @@ namespace ZhiZi.Barter
 
         public override void Apply()
         {
-            Campaign.Current?
-                .GetCampaignBehavior<HostageExchangeBehavior>()?
-                .StartContract(PlayerHero, ForeignHero, ForeignClan);
+            Campaign.Current?.GetCampaignBehavior<HostageExchangeBehavior>()
+                ?.StartContract(PlayerHero, ForeignHero, ForeignClan);
         }
     }
 }
