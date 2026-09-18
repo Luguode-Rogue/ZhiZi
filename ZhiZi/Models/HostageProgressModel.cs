@@ -49,7 +49,18 @@ namespace ZhiZi.Models
                 gain += 1f;
             }
 
-            return Math.Min(4f, gain);
+            int personalRelation = Hero.MainHero.GetRelation(hero);
+
+            if (personalRelation <= -20)
+            {
+                gain *= 0.75f;
+            }
+            else if (personalRelation >= 60)
+            {
+                gain += 1f;
+            }
+
+            return Math.Min(5f, gain);
         }
 
         public static void ApplyQuarterlyTraining(HostageContract contract, int cycles)
@@ -169,8 +180,66 @@ namespace ZhiZi.Models
                 return false;
             }
 
-            if (contract.StartTime.ElapsedDaysUntilNow
-                < CampaignTime.Years(PermanentYearsRequirement).ToDays)
+            Hero leader = contract.ForeignOriginalClan.Leader;
+            if (leader == null || !leader.IsAlive)
+            {
+                reason = "对方当前没有可签署永久交换的Clan Leader。";
+                return false;
+            }
+
+            float elapsedDays = contract.StartTime.ElapsedDaysUntilNow;
+            int personalRelation = Hero.MainHero.GetRelation(contract.ForeignHero);
+            int leaderRelation = Hero.MainHero.GetRelation(leader);
+
+            if (contract.DevotedToPlayerClan)
+            {
+                if (elapsedDays < CampaignTime.Years(2f).ToDays)
+                {
+                    reason = "质子的效忠仍需要至少两年的共同经历。";
+                    return false;
+                }
+
+                if (leaderRelation < 20)
+                {
+                    reason = "与对方当前Clan Leader的关系需要达到20。";
+                    return false;
+                }
+
+                reason = string.Empty;
+                return true;
+            }
+
+            if (contract.WantsToStay)
+            {
+                if (elapsedDays < CampaignTime.Years(2f).ToDays)
+                {
+                    reason = "质子主动留下仍要求至少履约两年。";
+                    return false;
+                }
+
+                if (contract.IntegrationProgress < 60f)
+                {
+                    reason = "主动留下需要整合度达到60。";
+                    return false;
+                }
+
+                if (personalRelation < 80)
+                {
+                    reason = "质子当前与你的关系需要达到80。";
+                    return false;
+                }
+
+                if (leaderRelation < 30)
+                {
+                    reason = "与对方当前Clan Leader的关系需要达到30。";
+                    return false;
+                }
+
+                reason = string.Empty;
+                return true;
+            }
+
+            if (elapsedDays < CampaignTime.Years(PermanentYearsRequirement).ToDays)
             {
                 reason = "至少需要维持三年质子关系。";
                 return false;
@@ -182,10 +251,7 @@ namespace ZhiZi.Models
                 return false;
             }
 
-            Hero leader = contract.ForeignOriginalClan.Leader;
-            if (leader == null
-                || !leader.IsAlive
-                || Hero.MainHero.GetRelation(leader) < PermanentRelationRequirement)
+            if (leaderRelation < PermanentRelationRequirement)
             {
                 reason = "与对方当前Clan Leader的关系需要达到50。";
                 return false;

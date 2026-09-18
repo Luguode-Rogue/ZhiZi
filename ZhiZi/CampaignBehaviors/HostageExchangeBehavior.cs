@@ -47,6 +47,19 @@ namespace ZhiZi.CampaignBehaviors
                 new Action<Hero, Hero, KillCharacterAction.KillCharacterActionDetail, bool>(
                     OnHeroKilled));
 
+            CampaignEvents.HeroWounded.AddNonSerializedListener(
+                this,
+                new Action<Hero>(OnHeroWounded));
+
+            CampaignEvents.HeroPrisonerTaken.AddNonSerializedListener(
+                this,
+                new Action<PartyBase, Hero>(OnHeroPrisonerTaken));
+
+            CampaignEvents.HeroPrisonerReleased.AddNonSerializedListener(
+                this,
+                new Action<Hero, PartyBase, IFaction, EndCaptivityDetail, bool>(
+                    OnHeroPrisonerReleased));
+
             CampaignEvents.WarDeclared.AddNonSerializedListener(
                 this,
                 new Action<IFaction, IFaction, DeclareWarAction.DeclareWarDetail>(
@@ -176,8 +189,6 @@ namespace ZhiZi.CampaignBehaviors
                 foreignHero,
                 playerOriginalClan,
                 true);
-
-            ChangeForeignClanRelation(contract, 3, true);
 
             TextObject message = new TextObject(
                 "{=!}质子交换生效：{PLAYER_HERO.NAME}与{FOREIGN_HERO.NAME}交换两年。");
@@ -338,7 +349,7 @@ namespace ZhiZi.CampaignBehaviors
                 "zhizi_manage_detail",
                 "zhizi_manage_detail",
                 "zhizi_manage_options",
-                "{=!}{ZHIZI_PLAYER_NAME}与{ZHIZI_FOREIGN_NAME}的约定还剩约{ZHIZI_REMAINING_DAYS}天。整合度为{ZHIZI_INTEGRATION}（{ZHIZI_INTEGRATION_DESC}）。",
+                "{=!}{ZHIZI_PLAYER_NAME}与{ZHIZI_FOREIGN_NAME}的约定还剩约{ZHIZI_REMAINING_DAYS}天。整合度为{ZHIZI_INTEGRATION}（{ZHIZI_INTEGRATION_DESC}），与你的关系为{ZHIZI_RELATION}。",
                 ManagedContractDetailsCondition,
                 null);
 
@@ -745,6 +756,10 @@ namespace ZhiZi.CampaignBehaviors
             MBTextManager.SetTextVariable(
                 "ZHIZI_REMAINING_DAYS",
                 remainingDays);
+
+            MBTextManager.SetTextVariable(
+                "ZHIZI_RELATION",
+                Hero.MainHero.GetRelation(contract.ForeignHero));
         }
 
         private bool RenewSelectedContractClickable(out TextObject hintText)
@@ -798,7 +813,13 @@ namespace ZhiZi.CampaignBehaviors
             float elapsedDays = contract.StartTime.ElapsedDaysUntilNow;
             bool veryEarly = elapsedDays < 90f;
             int relationPenalty = veryEarly ? -15 : -8;
+            int personalRelationPenalty = veryEarly ? -10 : -5;
             float influenceCost = veryEarly ? 25f : 10f;
+
+            ChangeForeignHeroRelation(
+                contract,
+                personalRelationPenalty,
+                true);
 
             ChangeForeignClanRelation(contract, relationPenalty, true);
 
@@ -872,11 +893,21 @@ namespace ZhiZi.CampaignBehaviors
                     continue;
                 }
 
+                if (UpdateRelationshipLifecycle(contract))
+                {
+                    continue;
+                }
+
                 UpdateIntegration(contract);
                 UpdateTraining(contract);
             }
 
-            TryShowExpiredContractInquiry();
+            TryShowRelationshipInquiry();
+
+            if (!InformationManager.IsAnyInquiryActive())
+            {
+                TryShowExpiredContractInquiry();
+            }
 
             if (!InformationManager.IsAnyInquiryActive())
             {
@@ -932,8 +963,543 @@ namespace ZhiZi.CampaignBehaviors
             contract.MarkTrainingUpdated();
         }
 
+        private bool UpdateRelationshipLifecycle(HostageContract contract)
+        {
+            Hero foreignHero = contract.ForeignHero;
+            if (!foreignHero.IsAlive)
+            {
+                return false;
+            }
+
+            int relation = Hero.MainHero.GetRelation(foreignHero);
+
+            if (relation <= -60 && contract.LowRelationStage < 3)
+            {
+                contract.SetLowRelationStage(3);
+
+                FinishContract(
+                    contract,
+                    ContractEndReason.RelationBreakdown,
+                    true);
+
+                return true;
+            }
+
+            UpdateCaptivityRelationship(contract);
+            UpdateRoleRelationship(contract);
+            UpdateAnnualRelationship(contract);
+            UpdateHighRelationMilestones(contract);
+
+            return !_contracts.Contains(contract);
+        }
+
+        private void UpdateCaptivityRelationship(HostageContract contract)
+        {
+            Hero foreignHero = contract.ForeignHero;
+            if (!foreignHero.IsPrisoner)
+            {
+                return;
+            }
+
+            contract.EnsureCaptivityStarted();
+
+            float captiveDays =
+                contract.CaptivityStartTime.ElapsedDaysUntilNow;
+
+            if (captiveDays >= 30f
+                && contract.CaptivityPenaltyStage < 1)
+            {
+                ChangeForeignHeroRelation(contract, -2, true);
+                contract.SetCaptivityPenaltyStage(1);
+            }
+
+            if (captiveDays >= 90f
+                && contract.CaptivityPenaltyStage < 2)
+            {
+                ChangeForeignHeroRelation(contract, -3, true);
+                contract.SetCaptivityPenaltyStage(2);
+            }
+        }
+
+        private void UpdateRoleRelationship(HostageContract contract)
+        {
+            Hero foreignHero = contract.ForeignHero;
+            if (foreignHero.IsPrisoner)
+            {
+                return;
+            }
+
+            bool isGovernor =
+                foreignHero.GovernorOf != null
+                && foreignHero.GovernorOf.OwnerClan == Clan.PlayerClan;
+
+            bool isPartyLeader =
+                foreignHero.PartyBelongedTo != null
+                && foreignHero.PartyBelongedTo.LeaderHero == foreignHero;
+
+            if (isGovernor && !contract.WasGovernor)
+            {
+                contract.BeginGovernorService();
+
+                if (!contract.GovernorAppointmentRewarded)
+                {
+                    contract.RewardGovernorAppointment();
+                    ChangeForeignHeroRelation(contract, 2, true);
+                }
+            }
+            else if (!isGovernor && contract.WasGovernor)
+            {
+                float duration = contract.EndGovernorService();
+                if (duration < 30f)
+                {
+                    ChangeForeignHeroRelation(contract, -2, true);
+                }
+            }
+
+            if (isPartyLeader && !contract.WasPartyLeader)
+            {
+                contract.BeginPartyLeadership();
+
+                if (!contract.PartyLeadershipRewarded)
+                {
+                    contract.RewardPartyLeadership();
+                    ChangeForeignHeroRelation(contract, 3, true);
+                }
+            }
+            else if (!isPartyLeader && contract.WasPartyLeader)
+            {
+                float duration = contract.EndPartyLeadership();
+                if (duration < 30f)
+                {
+                    ChangeForeignHeroRelation(contract, -2, true);
+                }
+            }
+
+            if (isGovernor || isPartyLeader)
+            {
+                contract.MarkMeaningfulService();
+
+                bool servedNinetyDays =
+                    (isGovernor
+                        && contract.GovernorSince.ToDays > 0d
+                        && contract.GovernorSince.ElapsedDaysUntilNow >= 90f)
+                    || (isPartyLeader
+                        && contract.PartyLeaderSince.ToDays > 0d
+                        && contract.PartyLeaderSince.ElapsedDaysUntilNow >= 90f);
+
+                if (servedNinetyDays
+                    && contract.CanRewardLongService()
+                    && Hero.MainHero.GetRelation(foreignHero) > -20)
+                {
+                    ChangeForeignHeroRelation(contract, 2, true);
+                    contract.MarkLongServiceReward();
+                }
+
+                return;
+            }
+
+            if (foreignHero.PartyBelongedTo == MobileParty.MainParty)
+            {
+                contract.MarkMeaningfulService();
+                return;
+            }
+
+            if (contract.CanApplyIdlePenalty())
+            {
+                ChangeForeignHeroRelation(contract, -2, true);
+                contract.MarkIdlePenalty();
+            }
+        }
+
+        private void UpdateAnnualRelationship(HostageContract contract)
+        {
+            int completedYears = (int)Math.Floor(
+                contract.StartTime.ElapsedDaysUntilNow
+                / CampaignTime.Years(1f).ToDays);
+
+            if (completedYears <= contract.AnnualRelationRewardCount)
+            {
+                return;
+            }
+
+            int newYears =
+                completedYears - contract.AnnualRelationRewardCount;
+
+            contract.SetAnnualRelationRewardCount(completedYears);
+
+            if (Hero.MainHero.GetRelation(contract.ForeignHero) <= -20)
+            {
+                return;
+            }
+
+            ChangeForeignHeroRelation(
+                contract,
+                2 * newYears,
+                true);
+        }
+
+        private void UpdateHighRelationMilestones(HostageContract contract)
+        {
+            int relation = Hero.MainHero.GetRelation(contract.ForeignHero);
+
+            if (relation >= 30 && contract.HighRelationStage < 1)
+            {
+                contract.SetHighRelationStage(1);
+                contract.AddIntegration(3f);
+
+                TextObject recognized = new TextObject(
+                    "{=!}{FOREIGN_HERO.NAME}开始真正认可自己在你家族中的经历。整合度提升3。");
+
+                recognized.SetCharacterProperties(
+                    "FOREIGN_HERO",
+                    contract.ForeignHero.CharacterObject,
+                    false);
+
+                MBInformationManager.AddQuickInformation(recognized);
+                return;
+            }
+
+            if (relation >= 60 && contract.HighRelationStage < 2)
+            {
+                contract.SetHighRelationStage(2);
+
+                TextObject close = new TextObject(
+                    "{=!}{FOREIGN_HERO.NAME}与你的关系已经十分亲近。今后的整合速度会更快。");
+
+                close.SetCharacterProperties(
+                    "FOREIGN_HERO",
+                    contract.ForeignHero.CharacterObject,
+                    false);
+
+                MBInformationManager.AddQuickInformation(close);
+                return;
+            }
+
+            if (relation >= 90
+                && contract.HighRelationStage < 4)
+            {
+                contract.SetHighRelationStage(4);
+                contract.MarkWantsToStay(true);
+
+                TextObject devoted = new TextObject(
+                    "{=!}{FOREIGN_HERO.NAME}明确表示已经把你的家族视作自己的家族。永久交换将不再要求整合度。");
+
+                devoted.SetCharacterProperties(
+                    "FOREIGN_HERO",
+                    contract.ForeignHero.CharacterObject,
+                    false);
+
+                MBInformationManager.AddQuickInformation(devoted);
+                return;
+            }
+
+            if (relation >= 80
+                && contract.HighRelationStage < 3
+                && contract.StartTime.ElapsedDaysUntilNow
+                    >= CampaignTime.Years(2f).ToDays
+                && contract.IntegrationProgress >= 60f
+                && !AreContractClansAtWar(contract))
+            {
+                contract.SetHighRelationStage(3);
+                contract.MarkWantsToStay(false);
+
+                TextObject wantsToStay = new TextObject(
+                    "{=!}{FOREIGN_HERO.NAME}表示，即使质子协议结束，也愿意继续留在你的家族。");
+
+                wantsToStay.SetCharacterProperties(
+                    "FOREIGN_HERO",
+                    contract.ForeignHero.CharacterObject,
+                    false);
+
+                MBInformationManager.AddQuickInformation(wantsToStay);
+            }
+        }
+
+        private void OnHeroWounded(Hero woundedHero)
+        {
+            HostageContract? contract = _contracts
+                .FirstOrDefault(x => x.ForeignHero == woundedHero);
+
+            if (contract == null)
+            {
+                return;
+            }
+
+            int penalty =
+                contract.WasWoundedRecently(30f)
+                    ? -5
+                    : -3;
+
+            contract.MarkWounded();
+
+            ChangeForeignHeroRelation(
+                contract,
+                penalty,
+                true);
+        }
+
+        private void OnHeroPrisonerTaken(
+            PartyBase capturer,
+            Hero prisoner)
+        {
+            HostageContract? contract = _contracts
+                .FirstOrDefault(x => x.ForeignHero == prisoner);
+
+            if (contract == null)
+            {
+                return;
+            }
+
+            contract.MarkCaptured();
+
+            ChangeForeignHeroRelation(
+                contract,
+                -3,
+                true);
+        }
+
+        private void OnHeroPrisonerReleased(
+            Hero prisoner,
+            PartyBase party,
+            IFaction capturerFaction,
+            EndCaptivityDetail detail,
+            bool showNotification)
+        {
+            HostageContract? contract = _contracts
+                .FirstOrDefault(x => x.ForeignHero == prisoner);
+
+            if (contract == null
+                || contract.CaptivityStartTime.ToDays <= 0d)
+            {
+                return;
+            }
+
+            bool playerRescue =
+                detail == EndCaptivityDetail.Ransom;
+
+            if (!playerRescue
+                && detail == EndCaptivityDetail.ReleasedAfterBattle
+                && MapEvent.PlayerMapEvent != null
+                && MapEvent.PlayerMapEvent.Winner != null
+                && MapEvent.PlayerMapEvent.Winner.MissionSide
+                    == MapEvent.PlayerMapEvent.PlayerSide)
+            {
+                playerRescue = true;
+            }
+
+            contract.ClearCaptivity();
+
+            if (playerRescue)
+            {
+                ChangeForeignHeroRelation(
+                    contract,
+                    4,
+                    true);
+
+                TextObject rescued = new TextObject(
+                    "{=!}{FOREIGN_HERO.NAME}因你促成获释，对你的关系提升。");
+
+                rescued.SetCharacterProperties(
+                    "FOREIGN_HERO",
+                    contract.ForeignHero.CharacterObject,
+                    false);
+
+                MBInformationManager.AddQuickInformation(rescued);
+            }
+        }
+
+        private void TryShowRelationshipInquiry()
+        {
+            if (InformationManager.IsAnyInquiryActive())
+            {
+                return;
+            }
+
+            HostageContract? returnDemand = _contracts
+                .FirstOrDefault(x =>
+                    x.ForeignHero.IsAlive
+                    && Hero.MainHero.GetRelation(x.ForeignHero) <= -40
+                    && x.LowRelationStage < 2);
+
+            if (returnDemand != null)
+            {
+                ShowReturnDemandInquiry(returnDemand);
+                return;
+            }
+
+            HostageContract? unhappy = _contracts
+                .FirstOrDefault(x =>
+                    x.ForeignHero.IsAlive
+                    && Hero.MainHero.GetRelation(x.ForeignHero) <= -20
+                    && x.LowRelationStage < 1);
+
+            if (unhappy != null)
+            {
+                ShowDiscontentInquiry(unhappy);
+            }
+        }
+
+        private void ShowDiscontentInquiry(HostageContract contract)
+        {
+            contract.SetLowRelationStage(1);
+
+            const int comfortCost = 1000;
+            bool canPay = Hero.MainHero.Gold >= comfortCost;
+
+            List<InquiryElement> options = new()
+            {
+                new InquiryElement(
+                    "comfort",
+                    "安抚并改善待遇（1000第纳尔）",
+                    null,
+                    canPay,
+                    canPay
+                        ? "支付1000第纳尔，关系+3。"
+                        : "第纳尔不足。"),
+
+                new InquiryElement(
+                    "promise",
+                    "承诺改善待遇",
+                    null,
+                    true,
+                    "不花钱，也不会立刻改变关系。"),
+
+                new InquiryElement(
+                    "ignore",
+                    "无视抱怨",
+                    null,
+                    true,
+                    "关系-2。")
+            };
+
+            string description =
+                contract.ForeignHero.Name
+                + "对目前的质子生活明显不满：\n“我不是自愿来到这里的。”";
+
+            MultiSelectionInquiryData inquiry = new(
+                "质子的不满",
+                description,
+                options,
+                false,
+                1,
+                1,
+                "确定",
+                string.Empty,
+                selected => HandleDiscontentDecision(contract, selected),
+                null,
+                string.Empty,
+                false);
+
+            MBInformationManager.ShowMultiSelectionInquiry(
+                inquiry,
+                true,
+                true);
+        }
+
+        private void HandleDiscontentDecision(
+            HostageContract contract,
+            List<InquiryElement> selected)
+        {
+            if (!_contracts.Contains(contract)
+                || selected == null
+                || selected.Count == 0)
+            {
+                return;
+            }
+
+            string? choice = selected[0].Identifier as string;
+
+            if (choice == "comfort"
+                && Hero.MainHero.Gold >= 1000)
+            {
+                Hero.MainHero.ChangeHeroGold(-1000);
+                ChangeForeignHeroRelation(contract, 3, true);
+            }
+            else if (choice == "ignore")
+            {
+                ChangeForeignHeroRelation(contract, -2, true);
+            }
+        }
+
+        private void ShowReturnDemandInquiry(HostageContract contract)
+        {
+            contract.SetLowRelationStage(2);
+
+            List<InquiryElement> options = new()
+            {
+                new InquiryElement(
+                    "accept",
+                    "同意返回",
+                    null,
+                    true,
+                    "结束质子交换。质子关系+5，不额外处罚来源家族关系。"),
+
+                new InquiryElement(
+                    "refuse",
+                    "拒绝请求",
+                    null,
+                    true,
+                    "质子关系-10，来源Clan Leader关系-3。")
+            };
+
+            string description =
+                contract.ForeignHero.Name
+                + "正式要求结束质子交换并返回原家族。";
+
+            MultiSelectionInquiryData inquiry = new(
+                "要求返回",
+                description,
+                options,
+                false,
+                1,
+                1,
+                "确定",
+                string.Empty,
+                selected => HandleReturnDemandDecision(contract, selected),
+                null,
+                string.Empty,
+                false);
+
+            MBInformationManager.ShowMultiSelectionInquiry(
+                inquiry,
+                true,
+                true);
+        }
+
+        private void HandleReturnDemandDecision(
+            HostageContract contract,
+            List<InquiryElement> selected)
+        {
+            if (!_contracts.Contains(contract)
+                || selected == null
+                || selected.Count == 0)
+            {
+                return;
+            }
+
+            string? choice = selected[0].Identifier as string;
+
+            if (choice == "accept")
+            {
+                ChangeForeignHeroRelation(contract, 5, true);
+
+                FinishContract(
+                    contract,
+                    ContractEndReason.RelationRequestedReturn,
+                    true);
+
+                return;
+            }
+
+            ChangeForeignHeroRelation(contract, -10, true);
+            ChangeForeignClanRelation(contract, -3, true);
+        }
+
         private void OnMapEventEnded(MapEvent mapEvent)
         {
+            bool playerInvolved =
+                mapEvent.InvolvedParties.Any(x => x == PartyBase.MainParty);
+
             foreach (HostageContract contract in _contracts.ToList())
             {
                 Hero foreignHero = contract.ForeignHero;
@@ -967,6 +1533,36 @@ namespace ZhiZi.CampaignBehaviors
                         false);
 
                     MBInformationManager.AddQuickInformation(firstBattle);
+                }
+
+                if (playerInvolved
+                    && heroParty.Side == PartyBase.MainParty.Side)
+                {
+                    int relationChange = 0;
+
+                    if (!contract.HasFoughtAlongsidePlayer)
+                    {
+                        relationChange += 3;
+                        contract.MarkFoughtAlongsidePlayer();
+                    }
+
+                    if (mapEvent.Winner != null
+                        && mapEvent.Winner.MissionSide == PartyBase.MainParty.Side
+                        && contract.CanGrantBattleRelationReward())
+                    {
+                        relationChange += 1;
+                        contract.MarkBattleRelationReward();
+                    }
+
+                    if (relationChange != 0)
+                    {
+                        ChangeForeignHeroRelation(
+                            contract,
+                            relationChange,
+                            true);
+                    }
+
+                    contract.MarkMeaningfulService();
                 }
 
                 HandleIntegrationThresholds(
@@ -1059,7 +1655,8 @@ namespace ZhiZi.CampaignBehaviors
 
             contract.ResolveSuccession();
 
-            if (contract.IntegrationProgress >= 60f)
+            if (contract.IntegrationProgress >= 60f
+                || Hero.MainHero.GetRelation(contract.ForeignHero) >= 60)
             {
                 TextObject continued = new TextObject(
                     "{=!}{FOREIGN_CLAN}更换了Clan Leader，但由于{FOREIGN_HERO.NAME}已经与玩家家族关系密切，新任领袖同意继续质子约定。");
@@ -1382,6 +1979,19 @@ namespace ZhiZi.CampaignBehaviors
             }
 
             contract.Renew(1f);
+
+            int personalRelation =
+                Hero.MainHero.GetRelation(contract.ForeignHero);
+
+            if (personalRelation >= 60)
+            {
+                ChangeForeignHeroRelation(contract, 1, true);
+            }
+            else if (personalRelation < 0)
+            {
+                ChangeForeignHeroRelation(contract, -2, true);
+            }
+
             ChangeForeignClanRelation(contract, 1, true);
 
             TextObject message = new TextObject(
@@ -1426,6 +2036,7 @@ namespace ZhiZi.CampaignBehaviors
                     contract.PlayerHero);
             }
 
+            ChangeForeignHeroRelation(contract, 5, true);
             ChangeForeignClanRelation(contract, 5, true);
 
             TextObject message = new TextObject(
@@ -1457,7 +2068,11 @@ namespace ZhiZi.CampaignBehaviors
             switch (reason)
             {
                 case ContractEndReason.NormalExpiry:
+                    ChangeForeignHeroRelation(contract, 2, true);
                     ChangeForeignClanRelation(contract, 2, true);
+                    break;
+                case ContractEndReason.RelationBreakdown:
+                    ChangeForeignClanRelation(contract, -5, true);
                     break;
                 case ContractEndReason.War:
                     ChangeForeignClanRelation(contract, -5, true);
@@ -1489,6 +2104,14 @@ namespace ZhiZi.CampaignBehaviors
                 case ContractEndReason.SuccessionRecall:
                     message = new TextObject(
                         "{=!}对方家族发生继承，新任Clan Leader召回了低整合度质子，约定结束。");
+                    break;
+                case ContractEndReason.RelationRequestedReturn:
+                    message = new TextObject(
+                        "{=!}你同意了质子的返乡请求，双方幸存成员已经归还。");
+                    break;
+                case ContractEndReason.RelationBreakdown:
+                    message = new TextObject(
+                        "{=!}质子与你的关系彻底破裂，强行结束约定并返回原家族。");
                     break;
                 default:
                     message = new TextObject(
@@ -1537,6 +2160,23 @@ namespace ZhiZi.CampaignBehaviors
                 false);
         }
 
+        private void ChangeForeignHeroRelation(
+            HostageContract contract,
+            int relationChange,
+            bool showNotification)
+        {
+            if (!contract.ForeignHero.IsAlive || relationChange == 0)
+            {
+                return;
+            }
+
+            ChangeRelationAction.ApplyPlayerRelation(
+                contract.ForeignHero,
+                relationChange,
+                false,
+                showNotification);
+        }
+
         private void ChangeForeignClanRelation(
             HostageContract contract,
             int relationChange,
@@ -1566,7 +2206,9 @@ namespace ZhiZi.CampaignBehaviors
             NormalExpiry,
             EarlyRecall,
             War,
-            SuccessionRecall
+            SuccessionRecall,
+            RelationRequestedReturn,
+            RelationBreakdown
         }
     }
 }
