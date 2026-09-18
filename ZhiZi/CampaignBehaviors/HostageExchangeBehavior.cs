@@ -90,7 +90,6 @@ namespace ZhiZi.CampaignBehaviors
                 && foreignHero.Age >= 18f
                 && foreignHero.Age < 25f
                 && foreignHero != foreignClan.Leader
-                && foreignHero.Spouse == null
                 && !IsHeroInActiveContract(foreignHero);
 
             return playerValid && foreignValid;
@@ -458,7 +457,6 @@ namespace ZhiZi.CampaignBehaviors
                     && x.Age >= 18f
                     && x.Age < 25f
                     && x != foreignClan.Leader
-                    && x.Spouse == null
                     && !IsHeroInActiveContract(x))
                 .OrderBy(x => x.Age)
                 .ToList();
