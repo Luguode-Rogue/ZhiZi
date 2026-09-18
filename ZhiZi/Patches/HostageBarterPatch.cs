@@ -4,8 +4,9 @@ using HarmonyLib;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.BarterSystem;
 using TaleWorlds.CampaignSystem.BarterSystem.Barterables;
-using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 using ZhiZi.Barter;
 using ZhiZi.Models;
 
@@ -45,7 +46,13 @@ namespace ZhiZi.Patches
 
             if (!exchange.IsStillValid())
             {
-                __instance.CancelAndFinalizePlayerBarter(offererHero, otherHero, barterData);
+                __instance.CancelAndFinalizePlayerBarter(
+                    offererHero,
+                    otherHero,
+                    barterData);
+
+                MBInformationManager.AddQuickInformation(
+                    new TextObject("{=!}质子交换条件已经失效。"));
                 return false;
             }
 
@@ -56,11 +63,20 @@ namespace ZhiZi.Patches
 
             if (MBRandom.RandomFloat > chance)
             {
-                __instance.CancelAndFinalizePlayerBarter(offererHero, otherHero, barterData);
+                __instance.CancelAndFinalizePlayerBarter(
+                    offererHero,
+                    otherHero,
+                    barterData);
+
+                TextObject rejected = new TextObject(
+                    "{=!}对方拒绝了这次质子交换报价。");
+                MBInformationManager.AddQuickInformation(rejected);
                 return false;
             }
 
-            AccessTools.Field(typeof(BarterManager), "_overpayAmount")?.SetValue(__instance, 0f);
+            AccessTools.Field(typeof(BarterManager), "_overpayAmount")
+                ?.SetValue(__instance, 0f);
+
             return true;
         }
 
