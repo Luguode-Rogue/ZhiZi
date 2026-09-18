@@ -184,6 +184,7 @@ namespace ZhiZi.Models
 
             Hero leader = contract.ForeignOriginalClan.Leader;
             if (leader == null
+                || !leader.IsAlive
                 || Hero.MainHero.GetRelation(leader) < PermanentRelationRequirement)
             {
                 reason = "与对方当前Clan Leader的关系需要达到50。";

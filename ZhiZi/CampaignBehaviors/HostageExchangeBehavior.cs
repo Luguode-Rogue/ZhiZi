@@ -1049,6 +1049,14 @@ namespace ZhiZi.CampaignBehaviors
                 return false;
             }
 
+            Hero? currentLeader = contract.ForeignOriginalClan.Leader;
+            if (currentLeader == null
+                || currentLeader == originalLeader
+                || !currentLeader.IsAlive)
+            {
+                return false;
+            }
+
             contract.ResolveSuccession();
 
             if (contract.IntegrationProgress >= 60f)

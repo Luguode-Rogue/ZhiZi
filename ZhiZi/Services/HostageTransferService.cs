@@ -88,7 +88,12 @@ namespace ZhiZi.Services
                 }
             }
 
-            if (addToMainParty && hero.IsAlive)
+            if (!hero.IsAlive)
+            {
+                return;
+            }
+
+            if (addToMainParty)
             {
                 if (!hero.IsActive)
                 {
@@ -99,6 +104,27 @@ namespace ZhiZi.Services
                 {
                     AddHeroToPartyAction.Apply(hero, MobileParty.MainParty, false);
                 }
+
+                return;
+            }
+
+            var destinationSettlement =
+                destinationClan.HomeSettlement ?? destinationClan.FactionMidSettlement;
+
+            if (destinationSettlement == null)
+            {
+                return;
+            }
+
+            if (hero.Age < Campaign.Current.Models.AgeModel.HeroComesOfAge)
+            {
+                hero.StayingInSettlement = destinationSettlement;
+            }
+            else
+            {
+                TeleportHeroAction.ApplyImmediateTeleportToSettlement(
+                    hero,
+                    destinationSettlement);
             }
         }
     }
