@@ -109,6 +109,23 @@ namespace ZhiZi.CampaignBehaviors
                 return false;
             }
 
+            Hero foreignLeader = foreignClan.Leader;
+            if (foreignLeader == null)
+            {
+                return false;
+            }
+
+            int minimumRelation =
+                foreignClan.Kingdom != null
+                && foreignClan.Kingdom == Clan.PlayerClan.Kingdom
+                    ? 0
+                    : 10;
+
+            if (Hero.MainHero.GetRelation(foreignLeader) < minimumRelation)
+            {
+                return false;
+            }
+
             bool playerValid =
                 playerHero.IsAlive
                 && playerHero.Clan == Clan.PlayerClan
@@ -380,6 +397,17 @@ namespace ZhiZi.CampaignBehaviors
 
             int contractLimit = Math.Max(1, Clan.PlayerClan.Tier + 1);
             if (_contracts.Count >= contractLimit)
+            {
+                return false;
+            }
+
+            int minimumRelation =
+                conversationHero.Clan.Kingdom != null
+                && conversationHero.Clan.Kingdom == Clan.PlayerClan.Kingdom
+                    ? 0
+                    : 10;
+
+            if (Hero.MainHero.GetRelation(conversationHero) < minimumRelation)
             {
                 return false;
             }
