@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Start Debugging [net472]",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}\\ZhiZi.csproj",
+      "launchConfigurationId": "TargetFramework=net472;Bannerlord"
+    },
+    {
+      "name": "Attach to Bannerlord [net472]",
+      "type": "clr",
+      "request": "attach",
+      "processName": "Bannerlord.exe"
+    }
+  ]
+}
